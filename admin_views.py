@@ -46,36 +46,33 @@ def show_admin_dashboard():
 
 def manage_users():
     st.header("إدارة المستخدمين")
-
+    
     # عرض المستخدمين الحاليين
-    users_data = get_all_users_for_admin_view() # استخدام الدالة الجديدة
-
+    users = get_all_users_for_admin_view()
+    
     # عرض جدول المستخدمين
-    if users_data:
-        for user in users_data:
-            col1, col2, col3, col4, col5, col6 = st.columns([2, 2, 2, 2, 1, 1])
-            with col1:
-                st.write(user['username'])
-            with col2:
-                role = "مسؤول نظام" if user['role'] == "admin" else "مسؤول محافظة" if user['role'] == "governorate_admin" else "موظف"
-                st.write(role)
-            with col3:
-                st.write(user['governorate_name'] if user['governorate_name'] else "غير محدد")
-            with col4:
-                st.write(user['admin_name'] if user['admin_name'] else "غير محدد")
-            with col5:
-                if st.button("تعديل", key=f"edit_{user['user_id']}"):
-                    st.session_state.editing_user = user['user_id']
-            with col6:
-                if st.button("حذف", key=f"delete_{user['user_id']}"):
-                    delete_user(user['user_id'])
-                    st.rerun()
-    else:
-        st.info("لا يوجد مستخدمون لعرضهم.")
-
+    for user in users:
+        col1, col2, col3, col4, col5, col6 = st.columns([2, 2, 2, 2, 1, 1])
+        with col1:
+            st.write(user[1])
+        with col2:
+            role = "مسؤول نظام" if user[2] == "admin" else "مسؤول محافظة" if user[2] == "governorate_admin" else "موظف"
+            st.write(role)
+        with col3:
+            st.write(user[3] if user[3] else "غير محدد")
+        with col4:
+            st.write(user[4] if user[4] else "غير محدد")
+        with col5:
+            if st.button("تعديل", key=f"edit_{user[0]}"):
+                st.session_state.editing_user = user[0]
+        with col6:
+            if st.button("حذف", key=f"delete_{user[0]}"):
+                delete_user(user[0])
+                st.rerun()
+    
     if 'editing_user' in st.session_state:
         edit_user_form(st.session_state.editing_user)
-
+    
     with st.expander("إضافة مستخدم جديد"):
         add_user_form()
 
