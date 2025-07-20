@@ -1,17 +1,26 @@
 import streamlit as st
+import psycopg2
+from database import (
+    get_db_connection,
+    get_all_users_for_admin_view,
+    get_audit_logs,
+    get_response_info,
+    get_response_details,
+    update_response_detail,
+    get_user_by_username,
+    update_user_allowed_surveys,
+    add_governorate_admin,
+    get_health_admins,
+    update_user,
+    update_survey,
+    get_governorates_list,
+    add_user,
+    save_survey,
+    delete_survey
+)
+import json
 import pandas as pd
 from datetime import datetime
-import json
-from database import (
-    get_audit_logs, get_response_info, get_response_details,
-    update_response_detail, get_user_by_username, update_user_allowed_surveys,
-    add_governorate_admin, get_health_admins, update_user, update_survey,
-    get_governorates_list, add_user, save_survey, delete_survey,
-    get_health_admin_name, get_all_users_for_admin_view, # إضافة هذه الدالة
-    add_governorate, update_governorate, delete_governorate, # دوال المحافظات
-    add_health_admin, update_health_admin, delete_health_admin, # دوال الإدارات الصحية
-    get_governorate_by_id, get_health_admin_by_id, get_responses_for_survey, get_survey_by_id # دوال مساعدة
-)
 
 def show_admin_dashboard():
     st.title("لوحة تحكم النظام")
