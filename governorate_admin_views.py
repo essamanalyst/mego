@@ -13,11 +13,13 @@ from database import (
     get_response_info,
     get_response_details,
     update_response_detail,
-    get_survey_by_id # إضافة هذه الدالة
+    get_db_connection
 )
-import database # استيراد الوحدة بأكملها للوصول إلى get_db_connection
 import psycopg2
+import psycopg2.extras
+
 def show_governorate_admin_dashboard():
+    """Main function to display governorate admin dashboard"""
     if st.session_state.get('role') != 'governorate_admin':
         st.error("غير مصرح لك بالوصول إلى هذه الصفحة")
         return
@@ -35,7 +37,7 @@ def show_governorate_admin_dashboard():
 
     tab1, tab2, tab3 = st.tabs([
         "📋 إدارة الاستبيانات",
-        "📊 عرض البيانات",
+        "📊 عرض البيانات", 
         "👥 إدارة الموظفين"
     ])
 
@@ -47,6 +49,7 @@ def show_governorate_admin_dashboard():
         manage_governorate_employees(governorate_id, governorate_name)
 
 def manage_governorate_surveys(governorate_id, governorate_name):
+    """Manage surveys for the governorate"""
     st.subheader(f"إدارة استبيانات محافظة {governorate_name}")
 
     if 'editing_survey' in st.session_state:
@@ -77,10 +80,27 @@ def manage_governorate_surveys(governorate_id, governorate_name):
         st.rerun()
 
 def edit_governorate_survey(survey_id, governorate_id):
+    """Edit survey status"""
     st.subheader("تعديل حالة الاستبيان")
 
     try:
-        survey = get_survey_by_id(survey_id) # استخدام الدالة الجديدة
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT survey_id, survey_name, created_at, is_active 
+                    FROM Surveys 
+                    WHERE survey_id = %s
+                """, (survey_id,))
+                survey = cur.fetchone()
+            conn.close()
+        else:
+            survey = None
+
+        if not survey:
+            st.error("الاستبيان غير موجود")
+            del st.session_state.editing_survey
+            return
 
         with st.form(f"edit_survey_{survey_id}"):
             st.text_input("اسم الاستبيان", value=survey['survey_name'], disabled=True)
@@ -92,11 +112,14 @@ def edit_governorate_survey(survey_id, governorate_id):
             with col1:
                 save_btn = st.form_submit_button("💾 حفظ التعديلات")
                 if save_btn:
-                    # استبدال استدعاء Supabase المباشر
-                    conn = database.get_db_connection()
+                    conn = get_db_connection()
                     if conn:
                         with conn.cursor() as cur:
-                            cur.execute("UPDATE Surveys SET is_active = %s WHERE survey_id = %s;", (is_active, survey_id))
+                            cur.execute("""
+                                UPDATE Surveys 
+                                SET is_active = %s 
+                                WHERE survey_id = %s
+                            """, (is_active, survey_id))
                         conn.commit()
                         conn.close()
                         st.success("تم تحديث حالة الاستبيان بنجاح")
@@ -115,6 +138,7 @@ def edit_governorate_survey(survey_id, governorate_id):
         st.error(f"حدث خطأ في قاعدة البيانات: {str(e)}")
 
 def view_governorate_data(governorate_id, governorate_name):
+    """View survey data for the governorate"""
     st.header(f"بيانات محافظة {governorate_name}")
 
     surveys = get_governorate_surveys(governorate_id)
@@ -133,14 +157,20 @@ def view_governorate_data(governorate_id, governorate_name):
         view_survey_responses(selected_survey[0], governorate_id)
 
 def view_survey_responses(survey_id, governorate_id):
+    """View and manage survey responses"""
     try:
-        survey = get_survey_by_id(survey_id) # استخدام الدالة الجديدة
-        st.subheader(f"إجابات استبيان {survey['survey_name']}")
-
-        # استبدال استدعاء Supabase المباشر
-        conn = database.get_db_connection()
+        conn = get_db_connection()
         if conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                # Get survey info
+                cur.execute("""
+                    SELECT survey_id, survey_name, created_at 
+                    FROM Surveys 
+                    WHERE survey_id = %s
+                """, (survey_id,))
+                survey = cur.fetchone()
+
+                # Get responses
                 cur.execute("""
                     SELECT
                         r.response_id,
@@ -158,12 +188,19 @@ def view_survey_responses(survey_id, governorate_id):
                     JOIN
                         Governorates g ON ha.governorate_id = g.governorate_id
                     WHERE
-                        r.survey_id = %s AND ha.governorate_id = %s;
+                        r.survey_id = %s AND g.governorate_id = %s;
                 """, (survey_id, governorate_id))
                 responses = cur.fetchall()
             conn.close()
         else:
+            survey = None
             responses = []
+
+        if not survey:
+            st.error("الاستبيان غير موجود")
+            return
+
+        st.subheader(f"إجابات استبيان {survey['survey_name']}")
 
         if not responses:
             st.info("لا توجد إجابات مسجلة لهذا الاستبيان في محافظتك")
@@ -261,6 +298,7 @@ def view_survey_responses(survey_id, governorate_id):
         st.error(f"حدث خطأ في قاعدة البيانات: {str(e)}")
 
 def manage_governorate_employees(governorate_id, governorate_name):
+    """Manage employees in the governorate"""
     st.header(f"إدارة موظفي محافظة {governorate_name}")
 
     employees = get_governorate_employees(governorate_id)
@@ -288,13 +326,14 @@ def manage_governorate_employees(governorate_id, governorate_name):
         edit_employee(st.session_state.editing_employee, governorate_id)
 
 def edit_employee(user_id, governorate_id):
+    """Edit employee details"""
     st.subheader("تعديل بيانات الموظف")
 
     try:
-        # استبدال استدعاء Supabase المباشر
-        conn = database.get_db_connection()
+        conn = get_db_connection()
         if conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                # Get employee info
                 cur.execute("""
                     SELECT
                         u.username,
@@ -308,29 +347,29 @@ def edit_employee(user_id, governorate_id):
                         u.user_id = %s;
                 """, (user_id,))
                 employee = cur.fetchone()
+
+                # Get health admins for the governorate
+                cur.execute("""
+                    SELECT admin_id, admin_name 
+                    FROM HealthAdministrations 
+                    WHERE governorate_id = %s 
+                    ORDER BY admin_name
+                """, (governorate_id,))
+                health_admins = cur.fetchall()
             conn.close()
         else:
             employee = None
+            health_admins = []
 
         if not employee:
             st.error("الموظف غير موجود")
             del st.session_state.editing_employee
             return
 
-        # استبدال استدعاء Supabase المباشر
-        conn = database.get_db_connection()
-        if conn:
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute("SELECT admin_id, admin_name FROM HealthAdministrations WHERE governorate_id = %s ORDER BY admin_name;", (governorate_id,))
-                health_admins = cur.fetchall()
-            conn.close()
-        else:
-            health_admins = []
-
+        # Get surveys and allowed surveys
         surveys = get_governorate_surveys(governorate_id)
         allowed_surveys = get_user_allowed_surveys(user_id)
         allowed_survey_ids = [s[0] for s in allowed_surveys]
-
         survey_ids = [s[0] for s in surveys]
         valid_allowed_survey_ids = [sid for sid in allowed_survey_ids if sid in survey_ids]
 
@@ -344,7 +383,7 @@ def edit_employee(user_id, governorate_id):
                 try:
                     admin_index = admin_options_keys.index(employee['assigned_region']) if employee['assigned_region'] in admin_options_keys else 0
                 except ValueError:
-                    admin_index = 0 # Fallback if assigned_region is not in current health_admins
+                    admin_index = 0
 
                 selected_admin = st.selectbox(
                     "الإدارة الصحية",
@@ -354,7 +393,6 @@ def edit_employee(user_id, governorate_id):
                 )
             else:
                 st.info("لا توجد إدارات صحية متاحة لهذه المحافظة.")
-
 
             if surveys:
                 survey_options_dict = {s[0]: s[1] for s in surveys}
