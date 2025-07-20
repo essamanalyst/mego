@@ -992,4 +992,21 @@ def get_all_users_for_admin_view():
     finally:
         if conn:
             conn.close()
-
+def get_survey_by_id(survey_id: int) -> Optional[Dict]:
+    """Get survey details by survey ID"""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("""
+            SELECT survey_id, survey_name, created_at, is_active 
+            FROM Surveys 
+            WHERE survey_id = %s
+        """, (survey_id,))
+        return cursor.fetchone()
+    except Exception as e:
+        st.error(f"حدث خطأ في جلب بيانات الاستبيان: {str(e)}")
+        return None
+    finally:
+        if conn:
+            conn.close()
