@@ -87,8 +87,16 @@ def manage_users():
 def add_user_form():
     conn = get_db_connection()
     try:
-        governorates = conn.execute("SELECT governorate_id, governorate_name FROM Governorates").fetchall()
-        surveys = conn.execute("SELECT survey_id, survey_name FROM Surveys").fetchall()
+        cursor = conn.cursor()
+        cursor.execute("SELECT governorate_id, governorate_name FROM Governorates")
+        governorates = cursor.fetchall()
+        
+        cursor.execute("SELECT survey_id, survey_name FROM Surveys")
+        surveys = cursor.fetchall()
+    except Exception as e:
+        st.error(f"حدث خطأ في جلب البيانات: {str(e)}")
+        governorates = []
+        surveys = []
     finally:
         conn.close()
 
@@ -158,10 +166,15 @@ def add_user_form():
                 # اختيار الإدارة الصحية
                 conn = get_db_connection()
                 try:
-                    health_admins = conn.execute(
+                    cursor = conn.cursor()
+                    cursor.execute(
                         "SELECT admin_id, admin_name FROM HealthAdministrations WHERE governorate_id=%s",
                         (selected_gov,)
-                    ).fetchall()
+                    )
+                    health_admins = cursor.fetchall()
+                except Exception as e:
+                    st.error(f"حدث خطأ في جلب الإدارات الصحية: {str(e)}")
+                    health_admins = []
                 finally:
                     conn.close()
 
@@ -249,32 +262,39 @@ def add_user_form():
 def edit_user_form(user_id):
     conn = get_db_connection()
     try:
-        user = conn.execute('''
+        cursor = conn.cursor()
+        cursor.execute('''
             SELECT username, role, assigned_region 
             FROM Users 
             WHERE user_id=%s
-        ''', (user_id,)).fetchone()
+        ''', (user_id,))
+        user = cursor.fetchone()
         
         if user is None:
             st.error("المستخدم غير موجود!")
             del st.session_state.editing_user
             return
             
-        governorates = conn.execute("SELECT governorate_id, governorate_name FROM Governorates").fetchall()
-        surveys = conn.execute("SELECT survey_id, survey_name FROM Surveys").fetchall()
-        allowed_surveys = conn.execute('''
+        cursor.execute("SELECT governorate_id, governorate_name FROM Governorates")
+        governorates = cursor.fetchall()
+        
+        cursor.execute("SELECT survey_id, survey_name FROM Surveys")
+        surveys = cursor.fetchall()
+        
+        cursor.execute('''
             SELECT survey_id FROM UserSurveys WHERE user_id=%s
-        ''', (user_id,)).fetchall()
-        allowed_surveys = [s[0] for s in allowed_surveys]
+        ''', (user_id,))
+        allowed_surveys = [s[0] for s in cursor.fetchall()]
         
         # الحصول على المحافظة الحالية للمستخدم (إذا كان مسؤول محافظة)
         current_gov = None
         current_admin = user[2]
         if user[1] == 'governorate_admin':
-            gov_info = conn.execute('''
+            cursor.execute('''
                 SELECT governorate_id FROM GovernorateAdmins 
                 WHERE user_id=%s
-            ''', (user_id,)).fetchone()
+            ''', (user_id,))
+            gov_info = cursor.fetchone()
             current_gov = gov_info[0] if gov_info else None
         
     except Exception as e:
@@ -312,10 +332,15 @@ def edit_user_form(user_id):
             
             conn = get_db_connection()
             try:
-                health_admins = conn.execute(
+                cursor = conn.cursor()
+                cursor.execute(
                     "SELECT admin_id, admin_name FROM HealthAdministrations WHERE governorate_id=%s",
                     (selected_gov,)
-                ).fetchall()
+                )
+                health_admins = cursor.fetchall()
+            except Exception as e:
+                st.error(f"حدث خطأ في جلب الإدارات الصحية: {str(e)}")
+                health_admins = []
             finally:
                 conn.close()
             
@@ -351,10 +376,11 @@ def edit_user_form(user_id):
                     update_user(user_id, new_username, new_role)
                     conn = get_db_connection()
                     try:
+                        cursor = conn.cursor()
                         # حذف أي تعيينات سابقة
-                        conn.execute("DELETE FROM GovernorateAdmins WHERE user_id=%s", (user_id,))
+                        cursor.execute("DELETE FROM GovernorateAdmins WHERE user_id=%s", (user_id,))
                         # إضافة التعيين الجديد
-                        conn.execute(
+                        cursor.execute(
                             "INSERT INTO GovernorateAdmins (user_id, governorate_id) VALUES (%s, %s)",
                             (user_id, selected_gov)
                         )
@@ -362,6 +388,9 @@ def edit_user_form(user_id):
                         if new_role != "admin":
                             update_user_allowed_surveys(user_id, selected_surveys)
                         conn.commit()
+                    except Exception as e:
+                        st.error(f"حدث خطأ في التحديث: {str(e)}")
+                        conn.rollback()
                     finally:
                         conn.close()
                 else:
@@ -379,13 +408,15 @@ def edit_user_form(user_id):
 def delete_user(user_id):
     conn = get_db_connection()
     try:
+        cursor = conn.cursor()
         # التحقق من وجود إجابات مرتبطة بالمستخدم
-        has_responses = conn.execute("SELECT 1 FROM Responses WHERE user_id=%s", (user_id,)).fetchone()
+        cursor.execute("SELECT 1 FROM Responses WHERE user_id=%s", (user_id,))
+        has_responses = cursor.fetchone()
         if has_responses:
             st.error("لا يمكن حذف المستخدم لأنه لديه إجابات مسجلة!")
             return False
         
-        conn.execute("DELETE FROM Users WHERE user_id=%s", (user_id,))
+        cursor.execute("DELETE FROM Users WHERE user_id=%s", (user_id,))
         conn.commit()
         st.success("تم حذف المستخدم بنجاح")
         return True
@@ -401,7 +432,12 @@ def manage_surveys():
     # عرض الاستبيانات الحالية
     conn = get_db_connection()
     try:
-        surveys = conn.execute("SELECT survey_id, survey_name, created_at, is_active FROM Surveys").fetchall()
+        cursor = conn.cursor()
+        cursor.execute("SELECT survey_id, survey_name, created_at, is_active FROM Surveys")
+        surveys = cursor.fetchall()
+    except Exception as e:
+        st.error(f"حدث خطأ في جلب الاستبيانات: {str(e)}")
+        surveys = []
     finally:
         conn.close()
     
@@ -432,16 +468,22 @@ def manage_surveys():
 def edit_survey(survey_id):
     conn = get_db_connection()
     try:
+        cursor = conn.cursor()
         # الحصول على بيانات الاستبيان
-        survey = conn.execute("SELECT survey_name, is_active FROM Surveys WHERE survey_id=%s", (survey_id,)).fetchone()
+        cursor.execute("SELECT survey_name, is_active FROM Surveys WHERE survey_id=%s", (survey_id,))
+        survey = cursor.fetchone()
         
         # الحصول على حقول الاستبيان الحالية
-        fields = conn.execute('''
+        cursor.execute('''
             SELECT field_id, field_label, field_type, field_options, is_required, field_order
             FROM Survey_Fields
             WHERE survey_id = %s
             ORDER BY field_order
-        ''', (survey_id,)).fetchall()
+        ''', (survey_id,))
+        fields = cursor.fetchall()
+    except Exception as e:
+        st.error(f"حدث خطأ في جلب بيانات الاستبيان: {str(e)}")
+        return
     finally:
         conn.close()
     
@@ -561,7 +603,12 @@ def create_survey_form():
     
     conn = get_db_connection()
     try:
-        governorates = conn.execute("SELECT governorate_id, governorate_name FROM Governorates").fetchall()
+        cursor = conn.cursor()
+        cursor.execute("SELECT governorate_id, governorate_name FROM Governorates")
+        governorates = cursor.fetchall()
+    except Exception as e:
+        st.error(f"حدث خطأ في جلب المحافظات: {str(e)}")
+        governorates = []
     finally:
         conn.close()
     
@@ -622,11 +669,13 @@ def display_survey_data(survey_id):
     """عرض بيانات استجابات الاستبيان وتصدير شامل لجميع البيانات"""
     conn = get_db_connection()
     try:
+        cursor = conn.cursor()
         # الحصول على اسم الاستبيان
-        survey_name = conn.execute(
+        cursor.execute(
             "SELECT survey_name FROM Surveys WHERE survey_id = %s", 
             (survey_id,)
-        ).fetchone()
+        )
+        survey_name = cursor.fetchone()
         
         if not survey_name:
             st.error("الاستبيان المحدد غير موجود")
@@ -636,26 +685,28 @@ def display_survey_data(survey_id):
         st.subheader(f"بيانات الاستبيان: {survey_name}")
 
         # الحصول على عدد الإجابات
-        total_responses = conn.execute(
+        cursor.execute(
             "SELECT COUNT(*) FROM Responses WHERE survey_id = %s", 
             (survey_id,)
-        ).fetchone()[0]
+        )
+        total_responses = cursor.fetchone()[0]
 
         if total_responses == 0:
             st.info("لا توجد بيانات متاحة لهذا الاستبيان بعد")
             return
 
         # الحصول على جميع الإجابات
-        responses = conn.execute('''
-            SELECT r.response_id, u.username, h.admin_name, g.governorate_name,
+        cursor.execute('''
+            SELECT r.response_id, u.username, ha.admin_name, g.governorate_name,
                    r.submission_date, r.is_completed
             FROM Responses r
             JOIN Users u ON r.user_id = u.user_id
-            JOIN HealthAdministrations h ON r.region_id = h.admin_id
-            JOIN Governorates g ON h.governorate_id = g.governorate_id
+            JOIN HealthAdministrations ha ON r.region_id = ha.admin_id
+            JOIN Governorates g ON ha.governorate_id = g.governorate_id
             WHERE r.survey_id = %s
             ORDER BY r.submission_date DESC
-        ''', (survey_id,)).fetchall()
+        ''', (survey_id,))
+        responses = cursor.fetchall()
 
         # عرض الإحصائيات
         completed_responses = sum(1 for r in responses if r[5])
@@ -691,7 +742,7 @@ def display_survey_data(survey_id):
                 # 2. ورقة تفاصيل جميع الإجابات
                 all_details = []
                 for response in responses:
-                    details = conn.execute('''
+                    cursor.execute('''
                         SELECT sf.field_label, rd.answer_value, 
                                u.username as entered_by, 
                                r.submission_date as entry_date,
@@ -702,7 +753,8 @@ def display_survey_data(survey_id):
                         JOIN Users u ON r.user_id = u.user_id
                         WHERE rd.response_id = %s
                         ORDER BY sf.field_order
-                    ''', (response[0],)).fetchall()
+                    ''', (response[0],))
+                    details = cursor.fetchall()
                     
                     for detail in details:
                         all_details.append({
@@ -719,12 +771,13 @@ def display_survey_data(survey_id):
                     details_df.to_excel(writer, sheet_name='تفاصيل_الإجابات', index=False)
                 
                 # 3. ورقة حقول الاستبيان
-                fields = conn.execute('''
+                cursor.execute('''
                     SELECT field_label, field_type, field_options, is_required
                     FROM Survey_Fields
                     WHERE survey_id = %s
                     ORDER BY field_order
-                ''', (survey_id,)).fetchall()
+                ''', (survey_id,))
+                fields = cursor.fetchall()
                 
                 fields_df = pd.DataFrame(
                     [(f[0], f[1], json.loads(f[2]) if f[2] else None, "نعم" if f[3] else "لا") for f in fields],
@@ -832,9 +885,11 @@ def view_data():
     
     conn = get_db_connection()
     try:
-        surveys = conn.execute(
+        cursor = conn.cursor()
+        cursor.execute(
             "SELECT survey_id, survey_name FROM Surveys ORDER BY survey_name"
-        ).fetchall()
+        )
+        surveys = cursor.fetchall()
         
         if not surveys:
             st.warning("لا توجد استبيانات متاحة")
@@ -858,7 +913,12 @@ def manage_governorates():
     st.header("إدارة المحافظات")
     conn = get_db_connection()
     try:
-        governorates = conn.execute("SELECT governorate_id, governorate_name, description FROM Governorates").fetchall()
+        cursor = conn.cursor()
+        cursor.execute("SELECT governorate_id, governorate_name, description FROM Governorates")
+        governorates = cursor.fetchall()
+    except Exception as e:
+        st.error(f"حدث خطأ في جلب المحافظات: {str(e)}")
+        governorates = []
     finally:
         conn.close()
     
@@ -890,12 +950,14 @@ def manage_governorates():
                 if governorate_name:
                     conn = get_db_connection()
                     try:
-                        existing = conn.execute("SELECT 1 FROM Governorates WHERE governorate_name=%s", 
-                                              (governorate_name,)).fetchone()
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT 1 FROM Governorates WHERE governorate_name=%s", 
+                                    (governorate_name,))
+                        existing = cursor.fetchone()
                         if existing:
                             st.error("هذه المحافظة موجودة بالفعل!")
                         else:
-                            conn.execute(
+                            cursor.execute(
                                 "INSERT INTO Governorates (governorate_name, description) VALUES (%s, %s)",
                                 (governorate_name, description)
                             )
@@ -904,6 +966,7 @@ def manage_governorates():
                             st.rerun()
                     except Exception as e:
                         st.error(f"حدث خطأ: {str(e)}")
+                        conn.rollback()
                     finally:
                         conn.close()
                 else:
@@ -912,8 +975,13 @@ def manage_governorates():
 def edit_governorate(gov_id):
     conn = get_db_connection()
     try:
-        gov = conn.execute("SELECT governorate_name, description FROM Governorates WHERE governorate_id=%s", 
-                      (gov_id,)).fetchone()
+        cursor = conn.cursor()
+        cursor.execute("SELECT governorate_name, description FROM Governorates WHERE governorate_id=%s", 
+                    (gov_id,))
+        gov = cursor.fetchone()
+    except Exception as e:
+        st.error(f"حدث خطأ في جلب بيانات المحافظة: {str(e)}")
+        return
     finally:
         conn.close()
     
@@ -926,12 +994,14 @@ def edit_governorate(gov_id):
             if st.form_submit_button("حفظ التعديلات"):
                 conn = get_db_connection()
                 try:
-                    existing = conn.execute("SELECT 1 FROM Governorates WHERE governorate_name=%s AND governorate_id!=%s", 
-                                          (new_name, gov_id)).fetchone()
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT 1 FROM Governorates WHERE governorate_name=%s AND governorate_id!=%s", 
+                                  (new_name, gov_id))
+                    existing = cursor.fetchone()
                     if existing:
                         st.error("هذا الاسم مستخدم بالفعل لمحافظة أخرى!")
                     else:
-                        conn.execute(
+                        cursor.execute(
                             "UPDATE Governorates SET governorate_name=%s, description=%s WHERE governorate_id=%s",
                             (new_name, new_desc, gov_id)
                         )
@@ -941,6 +1011,7 @@ def edit_governorate(gov_id):
                         st.rerun()
                 except Exception as e:
                     st.error(f"حدث خطأ: {str(e)}")
+                    conn.rollback()
                 finally:
                     conn.close()
         with col2:
@@ -951,13 +1022,14 @@ def edit_governorate(gov_id):
 def delete_governorate(gov_id):
     conn = get_db_connection()
     try:
-        has_regions = conn.execute("SELECT 1 FROM HealthAdministrations WHERE governorate_id=%s", 
+        cursor = conn.cursor()
+        has_regions = cursor.execute("SELECT 1 FROM HealthAdministrations WHERE governorate_id=%s", 
                                  (gov_id,)).fetchone()
         if has_regions:
             st.error("لا يمكن حذف المحافظة لأنها تحتوي على إدارات صحية!")
             return False
         
-        conn.execute("DELETE FROM Governorates WHERE governorate_id=%s", (gov_id,))
+        cursor.execute("DELETE FROM Governorates WHERE governorate_id=%s", (gov_id,))
         conn.commit()
         st.success("تم حذف المحافظة بنجاح")
         return True
@@ -972,11 +1044,16 @@ def manage_regions():
     
     conn = get_db_connection()
     try:
-        regions = conn.execute('''
+        cursor = conn.cursor()
+        cursor.execute('''
             SELECT h.admin_id, h.admin_name, h.description, g.governorate_name 
             FROM HealthAdministrations h
             JOIN Governorates g ON h.governorate_id = g.governorate_id
-        ''').fetchall()
+        ''')
+        regions = cursor.fetchall()
+    except Exception as e:
+        st.error(f"حدث خطأ في جلب الإدارات الصحية: {str(e)}")
+        regions = []
     finally:
         conn.close()
     for reg in regions:
@@ -1000,7 +1077,12 @@ def manage_regions():
     with st.expander("إضافة إدارة صحية جديدة"):
         conn = get_db_connection()
         try:
-            governorates = conn.execute("SELECT governorate_id, governorate_name FROM Governorates").fetchall()
+            cursor = conn.cursor()
+            cursor.execute("SELECT governorate_id, governorate_name FROM Governorates")
+            governorates = cursor.fetchall()
+        except Exception as e:
+            st.error(f"حدث خطأ في جلب المحافظات: {str(e)}")
+            governorates = []
         finally:
             conn.close()
         
@@ -1022,15 +1104,17 @@ def manage_regions():
                 if admin_name:
                     conn = get_db_connection()
                     try:
-                        existing = conn.execute('''
+                        cursor = conn.cursor()
+                        cursor.execute('''
                             SELECT 1 FROM HealthAdministrations 
                             WHERE admin_name=%s AND governorate_id=%s
-                        ''', (admin_name, governorate_id)).fetchone()
+                        ''', (admin_name, governorate_id))
+                        existing = cursor.fetchone()
                         
                         if existing:
                             st.error("هذه الإدارة الصحية موجودة بالفعل في هذه المحافظة!")
                         else:
-                            conn.execute(
+                            cursor.execute(
                                 "INSERT INTO HealthAdministrations (admin_name, description, governorate_id) VALUES (%s, %s, %s)",
                                 (admin_name, description, governorate_id)
                             )
@@ -1039,6 +1123,7 @@ def manage_regions():
                             st.rerun()
                     except Exception as e:
                         st.error(f"حدث خطأ: {str(e)}")
+                        conn.rollback()
                     finally:
                         conn.close()
                 else:
@@ -1047,12 +1132,17 @@ def manage_regions():
 def edit_health_admin(admin_id):
     conn = get_db_connection()
     try:
-        admin = conn.execute('''
+        cursor = conn.cursor()
+        cursor.execute('''
             SELECT h.admin_name, h.description, h.governorate_id, g.governorate_name
             FROM HealthAdministrations h
             JOIN Governorates g ON h.governorate_id = g.governorate_id
             WHERE h.admin_id=%s
-        ''', (admin_id,)).fetchone()
+        ''', (admin_id,))
+        admin = cursor.fetchone()
+    except Exception as e:
+        st.error(f"حدث خطأ في جلب بيانات الإدارة الصحية: {str(e)}")
+        return
     finally:
         conn.close()
     
@@ -1078,15 +1168,17 @@ def edit_health_admin(admin_id):
             if st.form_submit_button("حفظ التعديلات"):
                 conn = get_db_connection()
                 try:
-                    existing = conn.execute('''
+                    cursor = conn.cursor()
+                    cursor.execute('''
                         SELECT 1 FROM HealthAdministrations 
                         WHERE admin_name=%s AND governorate_id=%s AND admin_id!=%s
-                    ''', (new_name, new_gov, admin_id)).fetchone()
+                    ''', (new_name, new_gov, admin_id))
+                    existing = cursor.fetchone()
                     
                     if existing:
                         st.error("هذا الاسم مستخدم بالفعل لإدارة صحية أخرى في هذه المحافظة!")
                     else:
-                        conn.execute(
+                        cursor.execute(
                             "UPDATE HealthAdministrations SET admin_name=%s, description=%s, governorate_id=%s WHERE admin_id=%s",
                             (new_name, new_desc, new_gov, admin_id)
                         )
@@ -1096,6 +1188,7 @@ def edit_health_admin(admin_id):
                         st.rerun()
                 except Exception as e:
                     st.error(f"حدث خطأ: {str(e)}")
+                    conn.rollback()
                 finally:
                     conn.close()
         with col2:
@@ -1106,13 +1199,14 @@ def edit_health_admin(admin_id):
 def delete_health_admin(admin_id):
     conn = get_db_connection()
     try:
-        has_users = conn.execute("SELECT 1 FROM Users WHERE assigned_region=%s", 
+        cursor = conn.cursor()
+        has_users = cursor.execute("SELECT 1 FROM Users WHERE assigned_region=%s", 
                                (admin_id,)).fetchone()
         if has_users:
             st.error("لا يمكن حذف الإدارة الصحية لأنها مرتبطة بمستخدمين!")
             return False
         
-        conn.execute("DELETE FROM HealthAdministrations WHERE admin_id=%s", (admin_id,))
+        cursor.execute("DELETE FROM HealthAdministrations WHERE admin_id=%s", (admin_id,))
         conn.commit()
         st.success("تم حذف الإدارة الصحية بنجاح")
         return True
