@@ -8,14 +8,16 @@ from database import (
     save_response_detail,
     get_survey_fields,
     has_completed_survey_today,
-    get_allowed_surveys, # إضافة هذه الدالة
-    get_user_by_username, # لاستخدامها في get_last_login
-    get_survey_by_id, # لاستخدامها في display_single_survey
-    get_response_details # لاستخدامها في view_survey_responses
+    get_user_allowed_surveys,
+    get_user_by_username,
+    get_response_details,
+    get_db_connection
 )
-import database # استيراد الوحدة بأكملها للوصول إلى get_db_connection
 import psycopg2
+import psycopg2.extras
+
 def show_employee_dashboard():
+    """Main function to display the employee dashboard"""
     if not st.session_state.get('region_id'):
         st.error("حسابك غير مرتبط بأي منطقة. يرجى التواصل مع المسؤول.")
         return
@@ -26,7 +28,7 @@ def show_employee_dashboard():
         return
 
     display_employee_header(region_info)
-    allowed_surveys = get_allowed_surveys(st.session_state.user_id)
+    allowed_surveys = get_user_allowed_surveys(st.session_state.user_id)
 
     if not allowed_surveys:
         st.info("لا توجد استبيانات متاحة لك حاليًا")
@@ -34,13 +36,13 @@ def show_employee_dashboard():
 
     selected_surveys = display_survey_selection(allowed_surveys)
 
-    for survey_item in selected_surveys: # selected_surveys الآن هي قائمة قواميس
-        display_single_survey(survey_item['survey_id'], region_info['admin_id'])
+    for survey_id, survey_name in selected_surveys:
+        display_single_survey(survey_id, region_info['admin_id'])
 
 def get_employee_region_info(region_id):
+    """Get information about the employee's assigned health administration region"""
     try:
-        # استبدال استدعاء Supabase المباشر
-        conn = database.get_db_connection()
+        conn = get_db_connection()
         if conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute("""
@@ -58,26 +60,18 @@ def get_employee_region_info(region_id):
                 """, (region_id,))
                 result = cur.fetchone()
             conn.close()
-        else:
-            return None
-
-        if result:
-            return {
-                'admin_id': result['admin_id'],
-                'admin_name': result['admin_name'],
-                'governorate_name': result['governorate_name'],
-                'governorate_id': result['governorate_id']
-            }
+            return dict(result) if result else None
         return None
     except Exception as e:
         st.error(f"خطأ في قاعدة البيانات: {str(e)}")
         return None
 
 def display_employee_header(region_info):
+    """Display the employee dashboard header with region info"""
     st.set_page_config(layout="wide")
     st.title(f"لوحة الموظف - {region_info['admin_name']}")
 
-    last_login = get_last_login(st.session_state.user_id)
+    last_login = get_last_login(st.session_state.username)
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -90,43 +84,57 @@ def display_employee_header(region_info):
         st.subheader("آخر دخول")
         st.info(last_login if last_login else "غير معروف")
 
-def get_last_login(user_id):
-    user_data = get_user_by_username(user_id) # استخدام الدالة الجديدة
+def get_last_login(username):
+    """Get the user's last login time"""
+    user_data = get_user_by_username(username)
     return user_data['last_login'] if user_data and user_data.get('last_login') else None
 
 def display_survey_selection(allowed_surveys):
+    """Display survey selection interface"""
     st.header("الاستبيانات المتاحة")
 
-    # allowed_surveys هي الآن قائمة قواميس {survey_id, survey_name}
     selected_survey_ids = st.multiselect(
         "اختر استبيان أو أكثر",
-        options=[s['survey_id'] for s in allowed_surveys],
-        format_func=lambda x: next(s['survey_name'] for s in allowed_surveys if s['survey_id'] == x),
+        options=[s[0] for s in allowed_surveys],
+        format_func=lambda x: next(s[1] for s in allowed_surveys if s[0] == x),
         key="selected_surveys"
     )
-    # إرجاع القواميس الكاملة للاستبيانات المختارة
-    return [s for s in allowed_surveys if s['survey_id'] in selected_survey_ids]
+    
+    return [(s[0], s[1]) for s in allowed_surveys if s[0] in selected_survey_ids]
 
 def display_single_survey(survey_id, region_id):
+    """Display a single survey form"""
     try:
-        survey_info = get_survey_by_id(survey_id) # استخدام الدالة الجديدة
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT survey_id, survey_name, created_at 
+                    FROM Surveys 
+                    WHERE survey_id = %s
+                """, (survey_id,))
+                survey_info = cur.fetchone()
+            conn.close()
+        else:
+            survey_info = None
 
         if not survey_info:
             st.error("الاستبيان المحدد غير موجود")
             return
 
         if has_completed_survey_today(st.session_state.user_id, survey_id):
-            st.warning(f"لقد أكملت استبيان '{survey_info['survey_name']}' اليوم. يمكنك إكماله مرة أخرى غدًا.")
+            st.warning(f"لقد أكملت استبيان '{survey_info[1]}' اليوم. يمكنك إكماله مرة أخرى غدًا.")
             return
 
-        with st.expander(f"📋 {survey_info['survey_name']} (تاريخ الإنشاء: {survey_info['created_at'].strftime('%Y-%m-%d')})"):
+        with st.expander(f"📋 {survey_info[1]} (تاريخ الإنشاء: {survey_info[2].strftime('%Y-%m-%d')})"):
             fields = get_survey_fields(survey_id)
-            display_survey_form(survey_id, region_id, fields, survey_info['survey_name'])
+            display_survey_form(survey_id, region_id, fields, survey_info[1])
 
     except Exception as e:
         st.error(f"حدث خطأ في قاعدة البيانات: {str(e)}")
 
 def display_survey_form(survey_id, region_id, fields, survey_name):
+    """Display and handle survey form submission"""
     with st.form(f"survey_form_{survey_id}"):
         st.markdown("**يرجى تعبئة جميع الحقول المطلوبة (*)**")
         st.subheader("🧾 بيانات الاستبيان")
@@ -153,6 +161,7 @@ def display_survey_form(survey_id, region_id, fields, survey_name):
             )
 
 def render_field(field_id, label, field_type, options, is_required):
+    """Render different types of form fields"""
     required_mark = " *" if is_required else ""
 
     if field_type == 'text':
@@ -171,6 +180,7 @@ def render_field(field_id, label, field_type, options, is_required):
         return None
 
 def process_survey_submission(survey_id, region_id, fields, answers, is_completed, survey_name):
+    """Process survey form submission"""
     missing_fields = check_required_fields(fields, answers)
 
     if missing_fields and is_completed:
@@ -196,6 +206,7 @@ def process_survey_submission(survey_id, region_id, fields, answers, is_complete
     show_submission_message(is_completed, survey_name)
 
 def check_required_fields(fields, answers):
+    """Check for missing required fields"""
     missing_fields = []
     for field in fields:
         field_id, label, _, _, is_required, _ = field
@@ -204,6 +215,7 @@ def check_required_fields(fields, answers):
     return missing_fields
 
 def save_response_details(response_id, answers):
+    """Save all response details to database"""
     for field_id, answer in answers.items():
         if answer is not None:
             save_response_detail(
@@ -213,6 +225,7 @@ def save_response_details(response_id, answers):
             )
 
 def show_submission_message(is_completed, survey_name):
+    """Show appropriate submission message"""
     if is_completed:
         st.success(f"تم إرسال استبيان '{survey_name}' بنجاح")
         cols = st.columns(3)
@@ -222,18 +235,17 @@ def show_submission_message(is_completed, survey_name):
     else:
         st.success(f"تم حفظ مسودة استبيان '{survey_name}' بنجاح")
 
-# دالة get_allowed_surveys تم نقلها إلى database.py
-
 def view_survey_responses(survey_id):
+    """View previously submitted survey responses"""
     try:
-        survey = get_survey_by_id(survey_id) # استخدام الدالة الجديدة
-
-        st.subheader(f"إجابات استبيان {survey['survey_name']} (عرض فقط)")
-
-        # استبدال استدعاء Supabase المباشر
-        conn = database.get_db_connection()
+        conn = get_db_connection()
         if conn:
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT survey_name FROM Surveys WHERE survey_id = %s
+                """, (survey_id,))
+                survey_name = cur.fetchone()[0]
+
                 cur.execute("""
                     SELECT
                         response_id,
@@ -248,14 +260,21 @@ def view_survey_responses(survey_id):
                 responses = cur.fetchall()
             conn.close()
         else:
+            survey_name = None
             responses = []
+
+        if not survey_name:
+            st.error("الاستبيان المحدد غير موجود")
+            return
+
+        st.subheader(f"إجابات استبيان {survey_name} (عرض فقط)")
 
         if not responses:
             st.info("لا توجد إجابات مسجلة لهذا الاستبيان")
             return
 
         df = pd.DataFrame(
-            [(r['response_id'], r['submission_date'], "✔️" if r['is_completed'] else "✖️")
+            [(r[0], r[1], "✔️" if r[2] else "✖️")
              for r in responses],
             columns=["ID", "التاريخ", "الحالة"]
         )
@@ -264,17 +283,15 @@ def view_survey_responses(survey_id):
 
         selected_response_id = st.selectbox(
             "اختر إجابة لعرض تفاصيلها",
-            options=[r['response_id'] for r in responses],
+            options=[r[0] for r in responses],
             format_func=lambda x: f"إجابة #{x}"
         )
 
         if selected_response_id:
-            details = get_response_details(selected_response_id) # استخدام الدالة الجديدة
-
+            details = get_response_details(selected_response_id)
             st.subheader("تفاصيل الإجابة المحددة")
             for detail in details:
-                # تفاصيل الإجابة تأتي الآن كـ (detail_id, field_id, label, field_type, options, answer)
-                st.write(f"**{detail[2]}:** {detail[5] if detail[5] else 'غير مدخل'}") # detail[2] for label, detail[5] for answer
+                st.write(f"**{detail[2]}:** {detail[5] if detail[5] else 'غير مدخل'}")
 
     except Exception as e:
         st.error(f"حدث خطأ في قاعدة البيانات: {str(e)}")
