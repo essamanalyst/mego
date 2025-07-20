@@ -964,3 +964,32 @@ def get_audit_logs(
     finally:
         if conn:
             conn.close()
+
+def get_all_users_for_admin_view():
+    """الحصول على جميع المستخدمين لعرضها في لوحة التحكم الإدارية"""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT u.user_id, u.username, u.role, 
+                   COALESCE(g.governorate_name, ga.governorate_name) as governorate_name, 
+                   h.admin_name
+            FROM Users u
+            LEFT JOIN HealthAdministrations h ON u.assigned_region = h.admin_id
+            LEFT JOIN Governorates g ON h.governorate_id = g.governorate_id
+            LEFT JOIN (
+                SELECT ga.user_id, g.governorate_name 
+                FROM GovernorateAdmins ga
+                JOIN Governorates g ON ga.governorate_id = g.governorate_id
+            ) ga ON u.user_id = ga.user_id
+            ORDER BY u.user_id
+        ''')
+        return cursor.fetchall()
+    except Exception as e:
+        st.error(f"حدث خطأ في جلب بيانات المستخدمين: {str(e)}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
